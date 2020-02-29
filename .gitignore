@@ -1,0 +1,5 @@
+*.npy
+*.pkl
+*.ann
+*.faiss
+*.json
