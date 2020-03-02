@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow import keras
-from transformers import AutoTokenizer, TFAutoModelForSequenceClassification, AutoConfig
+from transformers import AutoTokenizer, TFAutoModel, TFAutoModelForSequenceClassification, AutoConfig
 from sklearn.model_selection import train_test_split
 
 from tqdm.notebook import tqdm_notebook
@@ -18,9 +18,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
+import faiss
+from annoy import AnnoyIndex
+
 
 def make_or_load_annoy(embedding_posix, n_trees=500, index_type="angular", a=0, b=3): #a and b determine how many hidden layers of [CLS] to include in the embeddings for transformer-based embeddings
     current_dir= Path(".")
+    encoded_dir = current_dir / "Encoded"
+    tokenized_dir = current_dir / "Tokenized"
     embedding_name= embedding_posix.stem
     suffix= ""
     if not (current_dir / "Annoy" / f'{embedding_name}_{index_type}_{n_trees}.ann').exists() and not (current_dir / "Annoy" / f'{embedding_name}_{index_type}_{n_trees}_{a}_to_{b}.ann').exists():
@@ -66,12 +71,12 @@ def make_or_load_annoy(embedding_posix, n_trees=500, index_type="angular", a=0, 
     
     
     if embedding_name in [file.stem for file in tokenized_dir.iterdir()]: #True for huggingface models    
-        print("Found tokenized pickle.1")
+        print("Found tokenized pickle.")
         tokenized = pd.read_pickle(f"./Tokenized/{embedding_name}.pkl")
         arg_ids = tokenized[["id"]]
     
     elif (embedding_name.split("_")[0] == "autoencoded"):
-        print("Found tokenized pickle.2")
+        print("Found tokenized pickle.")
         tokenized = pd.read_pickle(f"./Tokenized/{embedding_name.split('_')[1]}.pkl")
         arg_ids = tokenized[["id"]]
     else:
@@ -79,14 +84,15 @@ def make_or_load_annoy(embedding_posix, n_trees=500, index_type="angular", a=0, 
         dataset = pd.read_pickle("./Data/dataset.pkl")
         arg_ids = dataset[["id"]]
     print("-------------------")
-    print("-------------------")
-    print("-------------------")
+    print("-------ANNOY-------")
     print("-------------------")
 
     return annoy, arg_ids
 
 def make_or_load_pq(embedding_posix, m=64, n_bits=8, a=0, b=3): #a and b determine how many hidden layers of [CLS] to include in the embeddings for transformer-based embeddings
     current_dir= Path(".")
+    encoded_dir = current_dir / "Encoded"
+    tokenized_dir = current_dir / "Tokenized"
     embedding_name= embedding_posix.stem
     suffix= ""
     if not (current_dir / "Faiss" / f'{embedding_name}_{m}_{n_bits}.faiss').exists() and not (current_dir / "Faiss" / f'{embedding_name}_{m}_{n_bits}_{a}_to_{b}.faiss').exists():
@@ -121,7 +127,9 @@ def make_or_load_pq(embedding_posix, m=64, n_bits=8, a=0, b=3): #a and b determi
         
     else: #True when Index already exists
 
-
+        if embedding_name in [file.stem for file in tokenized_dir.iterdir()]:
+            suffix = f"_{a}_to_{b}"
+               
         print(f"Index already exists, now loading {embedding_name}_{m}_{n_bits}{suffix}")
         pq = faiss.read_index(f'./Faiss/{embedding_name}_{m}_{n_bits}{suffix}.faiss')
         
@@ -141,7 +149,11 @@ def make_or_load_pq(embedding_posix, m=64, n_bits=8, a=0, b=3): #a and b determi
         dataset = pd.read_pickle("./Data/dataset.pkl")
         arg_ids = dataset[["id"]]
     print("-------------------")
-
+    print("-------FAISS-------")
     print("-------------------")
 
     return pq, arg_ids
+
+def return_args(id_set):
+    l = list(id_set)
+    return arguments[arguments['id'].isin(l)].copy()
