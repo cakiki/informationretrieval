@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import xml.etree.ElementTree as ET
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
 
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import Search, Q
