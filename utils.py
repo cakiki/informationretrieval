@@ -1,6 +1,8 @@
 import tensorflow as tf
+import torch
 from tensorflow import keras
-from transformers import AutoTokenizer, TFAutoModel, TFAutoModelForSequenceClassification, AutoConfig
+from transformers import AutoTokenizer, AutoModelWithLMHead, TFAutoModel, TFAutoModelForSequenceClassification, AutoConfig, BertForMaskedLM
+from pplm_utils import *
 from sklearn.model_selection import train_test_split
 
 from tqdm.notebook import tqdm_notebook
@@ -15,6 +17,7 @@ from elasticsearch import Elasticsearch
 from elasticsearch_dsl import Search, Q
 
 from functools import partial
+from itertools import chain
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -158,3 +161,141 @@ def make_or_load_pq(embedding_posix, m=64, n_bits=8, a=0, b=3): #a and b determi
 def return_args(id_set):
     l = list(id_set)
     return arguments[arguments['id'].isin(l)].copy()
+
+def expand_mlm(model, tokenizer, query, k=10):
+    from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS as SKLEARN_STOPWORDS
+    SKLEARN_STOPWORDS = set(SKLEARN_STOPWORDS)
+
+    from spacy.lang.en.stop_words import STOP_WORDS as SPACY_STOPWORDS
+
+    import nltk
+    from ipywidgets import Output
+    out = Output()
+    with out:
+        nltk.download('stopwords')
+    from nltk.corpus import stopwords
+    NLTK_STOPWORDS = set(stopwords.words('english'))
+
+    STOP_WORDS = set.union(*[SKLEARN_STOPWORDS, SPACY_STOPWORDS, NLTK_STOPWORDS])
+    from string import punctuation
+
+
+    query = "What do you think? "+ query
+
+    input_context_pro = [
+    '-'+query+'\n-Yes, because of [MASK] and the benefits of [MASK] [MASK].',
+    '-'+query+'\n-Absolutely, I think [MASK] is good!.',
+    "-"+query+"\n-Yes, [MASK] is associated with [MASK] during [MASK]."
+
+    ]
+
+
+
+    input_context_con = [
+    '-'+query+'\n-No, because of [MASK] and the risk of [MASK] [MASK].',
+    '-'+query+'\n-Absolutely not, I think [MASK] is bad!.',
+    "-"+query+"\n-No, [MASK] is associated with [MASK] during [MASK]."
+    ]
+
+    input_context_neutral = [
+    query+' What about [MASK] or [MASK]?',
+    query+" Don't forget about [MASK]!"
+    
+    ]
+    hallucinations = []
+    for input_context in chain(*[input_context_pro, input_context_con, input_context_neutral]):
+        inp_tens = torch.tensor(tokenizer.encode(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(input_context)))).unsqueeze(0)
+        mask_indices = np.nonzero(inp_tens.squeeze()==103).squeeze()
+        preds = model(inp_tens)[0].squeeze()
+        mask_indices = [mask_indices.tolist()] if type(mask_indices.tolist())!=list else mask_indices.tolist()
+        top_words = []
+        for i in mask_indices:
+            top_words.append(torch.topk(preds[i], k=k))
+        words = []
+        for mask_topk in top_words:
+            for token in mask_topk.indices.tolist():
+                words.append(tokenizer.decode(token, clean_up_tokenization_spaces=True))
+            #Interestingly, BERT was returning the ##carriage subword, obviously part of "miscarriage" in the "pregnancy" context. Further investigation needed to see how to return the full of word. Filtering out subwords for now.
+            #Filter out subwords
+            words = [word.replace(" ","") for word in words if not word.startswith("#")]
+            words = [word for word in words if not word.endswith("#")]
+            #Filter out punctuation
+            words = [word for word in words if not word in punctuation]
+        words = set(words)
+        words = list(words.difference(STOP_WORDS))
+        hallucinations.extend(words)
+    hallucinations = set(hallucinations)
+    hallucinations = list(hallucinations)
+    return hallucinations
+
+def expand_lm(model, tokenizer, query, print_generated=True, max_len=100, num_beams=10, num_return_sequences=3, temperature=1.6, repetition_penalty=20, top_k=100, top_p=0.4):
+    query = "What do you think?"+query 
+    input_context_pro = [
+    "- "+query+"\n- Yes because",
+    query+"The answer is yes."
+    ]
+    input_context_con = [
+    "- "+query+"\n- No because",
+    query+"The answer is no."
+    ]
+
+    input_context_neutral = [
+    "- " + query + "\n- I don't know",
+    "- " + query + "\n- Not sure"
+    ]
+    hallucinated_greedy = []
+
+    for j, input_context in enumerate(chain(*[input_context_pro, input_context_con, input_context_neutral])):
+        input_ids = torch.tensor(tokenizer.encode(input_context)).unsqueeze(0)  
+        L = len(input_ids[0])
+        outputs =model.generate(max_length=100, input_ids=input_ids, do_sample=False, num_beams=num_beams, top_k=top_k , top_p=top_p, num_return_sequences=1, temperature=temperature, repetition_penalty=repetition_penalty)
+        for i in range(1): 
+            hallucinated_greedy.append(tokenizer.decode(outputs[i][L:], skip_special_tokens=True))
+            if print_generated:
+                print('')
+                print(f'Greedily hallucinated for query {j}:\n {tokenizer.decode(outputs[i][L:], skip_special_tokens=True)}')
+                print('')
+
+
+
+    hallucinated_sampling = []
+
+    for j, input_context in enumerate(chain(*[input_context_pro, input_context_con, input_context_neutral])):
+        input_ids = torch.tensor(tokenizer.encode(input_context)).unsqueeze(0)  # encode input context
+        L = len(input_ids[0])
+        outputs =model.generate(max_length=100, input_ids=input_ids, do_sample=True, num_beams=num_beams, top_k=top_k , top_p=top_p, num_return_sequences=num_return_sequences, temperature=temperature, repetition_penalty=repetition_penalty)
+        for i in range(num_return_sequences):
+            if print_generated:
+                print(" ")
+                print(f'Hallucinated {i+1} for query {j+1}: {tokenizer.decode(outputs[i][L:], skip_special_tokens=True)}')
+                print(" ")
+            hallucinated_sampling.append(tokenizer.decode(outputs[i][L:], skip_special_tokens=True))
+
+    return hallucinated_greedy, hallucinated_sampling
+
+def expand_pplm(model, tokenizer, query, print_generated=True, bag_of_words='arg_bow', length=10, stepsize=0.03, temperature=1.1,  top_k=15, num_iterations=6, num_samples=3, grad_length=1000, horizon_length=5, gm_scale=0.95, kl_scale=0.5, repetition_penalty=2, gamma=1.5, no_cuda=True, device="cpu"):
+    hallucinated = []
+    
+    query = "What do you think?"+query 
+    input_context_pro = [
+    "- "+query+"\n- Yes because",
+    query+"The answer is yes."
+    ]
+    input_context_con = [
+    "- "+query+"\n- No because",
+    query+"The answer is no."
+    ]
+
+    input_context_neutral = [
+    "- " + query + "\n- I don't know",
+    "- " + query + "\n- Not sure"
+    ]
+    for q in chain(*[input_context_con, input_context_pro, input_context_neutral]):
+        tokenized_cond_text = tokenizer.encode("- What do you think? " + q + "\n- Yes")
+        _ , pert_gen_tok_texts, _, _ = full_text_generation(model=model, tokenizer=tokenizer, context=tokenized_cond_text, bag_of_words=bag_of_words, length=length, stepsize=stepsize, temperature=temperature,  top_k=top_k, num_iterations=num_iterations, num_samples=num_samples, grad_length=grad_length, horizon_length=horizon_length, gm_scale=gm_scale, kl_scale=kl_scale, repetition_penalty=repetition_penalty, gamma=gamma, no_cuda=no_cuda, device=device)
+        hallucinated.append(tokenizer.decode(pert_gen_tok_texts[0][0][len(tokenized_cond_text):]))
+        if print_generated:
+            print(tokenizer.decode(pert_gen_tok_texts[0][0][len(tokenized_cond_text):]))                                                                                
+                                                                                          
+                                                                                          
+    return hallucinated
