@@ -21,9 +21,9 @@ This repository documents my approach to the Touché Shared Task on Argument Ret
 
 ## Docker
 
-```bash
-foo@bar:/informationretrieval docker run --gpus all -it --rm --network host -v $PWD:/tf/data -w /tf/data tensorflow/tensorflow:latest-gpu-py3-jupyter
-foo@bar:/informationretrieval docker run --rm --network host -v $(pwd)/elastic/data:/usr/share/elasticsearch/data -e "discovery.type=single-node" docker.elastic.co/elasticsearch/elasticsearch:7.6.0
+```console
+foo@bar:/informationretrieval$ docker run --gpus all -it --rm --network host -v $PWD:/tf/data -w /tf/data tensorflow/tensorflow:latest-gpu-py3-jupyter
+foo@bar:/informationretrieval$ docker run --rm --network host -v $(pwd)/elastic/data:/usr/share/elasticsearch/data -e "discovery.type=single-node" docker.elastic.co/elasticsearch/elasticsearch:7.6.0
 
 ```
 
