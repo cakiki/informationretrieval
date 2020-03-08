@@ -5,6 +5,10 @@
 This repository documents my approach to the Touché Shared Task on Argument Retrieval which is part of the CLEF conference. My efforts come in the context of a course in advanced information retrieval at the University of Leipzig.
 
 ## The data
+<details>
+    <summary>Data Directory</summary>
+<p>
+
 ```bash
 ./Data/
 ├── annotators.csv
@@ -16,7 +20,8 @@ This repository documents my approach to the Touché Shared Task on Argument Ret
 ├── topics-automatic-runs-task-1.xml
 └── topics.csv
 ```
-
+</p>
+</details>
 
 
 ## Docker
