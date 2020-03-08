@@ -18,6 +18,8 @@ from elasticsearch_dsl import Search, Q
 
 from functools import partial
 from itertools import chain
+from itertools import combinations
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
